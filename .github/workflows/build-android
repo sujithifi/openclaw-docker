@@ -1,0 +1,91 @@
+name: Build OpenClaw Android (Latest Release)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 9 * * *'  # daily check at 9am UTC
+
+jobs:
+  get-latest-release:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      skip: ${{ steps.check.outputs.skip }}
+    steps:
+      - name: Get latest upstream release tag
+        id: release
+        run: |
+          TAG=$(curl -fsSL https://api.github.com/repos/openclaw/openclaw/releases/latest \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            | jq -r '.tag_name')
+          echo "Latest upstream release: $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Check if already built
+        id: check
+        run: |
+          STATUS=$(curl -fsSL -o /dev/null -w "%{http_code}" \
+            https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ steps.release.outputs.tag }} \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}")
+          if [ "$STATUS" = "200" ]; then
+            echo "Release ${{ steps.release.outputs.tag }} already exists — skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: get-latest-release
+    if: needs.get-latest-release.outputs.skip == 'false'
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ needs.get-latest-release.outputs.tag }}
+
+    steps:
+      - name: Checkout openclaw/openclaw at release tag
+        uses: actions/checkout@v4
+        with:
+          repository: openclaw/openclaw   # ← upstream, not your repo
+          ref: ${{ env.RELEASE_TAG }}
+          path: openclaw-src              # ← isolated subfolder
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Decode keystore
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > openclaw-src/apps/android/release.jks
+
+      - name: Build release APK
+        working-directory: openclaw-src/apps/android
+        env:
+          KEYSTORE_PATH: ${{ github.workspace }}/openclaw-src/apps/android/release.jks
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          ./gradlew :app:assembleRelease --no-daemon \
+            -Pandroid.injected.signing.store.file="$KEYSTORE_PATH" \
+            -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
+            -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
+
+      - name: Clean up keystore
+        if: always()
+        run: rm -f openclaw-src/apps/android/release.jks
+
+      - name: Publish to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: "OpenClaw Android ${{ env.RELEASE_TAG }}"
+          body: |
+            Signed release APK built from upstream tag [${{ env.RELEASE_TAG }}](https://github.com/openclaw/openclaw/releases/tag/${{ env.RELEASE_TAG }}).
+          files: openclaw-src/apps/android/app/build/outputs/apk/release/*.apk
+          token: ${{ secrets.GITHUB_TOKEN }}
