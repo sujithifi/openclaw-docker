@@ -24,7 +24,7 @@ jobs:
       - name: Check if already built
         id: check
         run: |
-          STATUS=$(curl -fsSL -o /dev/null -w "%{http_code}" \
+          STATUS=$(curl -sSL -o /dev/null -w "%{http_code}" \
             https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ steps.release.outputs.tag }} \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}")
           if [ "$STATUS" = "200" ]; then
