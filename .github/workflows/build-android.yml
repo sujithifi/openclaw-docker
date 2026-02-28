@@ -3,7 +3,7 @@ name: Build OpenClaw Android (Latest Release)
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 9 * * *'  # daily check at 9am UTC
+    - cron: '0 9 * * 6'  # daily check at 9am UTC
 
 jobs:
   get-latest-release:
