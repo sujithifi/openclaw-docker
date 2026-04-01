@@ -47,6 +47,17 @@ jobs:
           repository: openclaw/openclaw
           ref: ${{ steps.release.outputs.tag }}
 
+      - name: Patch Dockerfile to add Claude CLI
+        if: steps.check.outputs.exists != 'true'
+        run: |
+          cat >> Dockerfile << 'EOF'
+
+          # Install Claude Code CLI
+          USER root
+          RUN npm install -g @anthropic-ai/claude-code
+          USER node
+          EOF
+
       - name: Set up Docker Buildx
         if: steps.check.outputs.exists != 'true'
         uses: docker/setup-buildx-action@v3
